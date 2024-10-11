@@ -48,18 +48,32 @@ def apply_rotary_emb(
         Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
     """
 
-    _, seqlen, _, _ = query.shape
-    device = query.device
+    _, seqlen, _, _ = query.shape # batch seqlen heads headim
+    # device = query.devicemasked.reshape(5,-1,2)
     # todo
     #
     # Please refer to slide 22 in https://phontron.com/class/anlp2024/assets/slides/anlp-05-transformers.pdf
     # and Section 3 in https://arxiv.org/abs/2104.09864.
 
-    # reshape xq and xk to match the complex representation
-    query_real, query_imag = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1)
+    # reshape xq and xk to match the complex representation 
+    query_real, query_imag = query.float().reshape(query.shape[:-1] + (-1, 2)).unbind(-1) # batch sqlen H headim//2
     key_real, key_imag = key.float().reshape(key.shape[:-1] + (-1, 2)).unbind(-1)
     # This separates each query/key vector into its odd and even indices (assuming *one-indexing*).
     # query_real contains q_1, q_3, q_5, ... and query_imag contains q_2, q_4, q_6, ...
+    theta = 1. / (theta ** (torch.arange(0,head_dim,2).float() / head_dim)) # headim // 2
+    m = torch.arange(seqlen) 
+    theta = torch.outer(m,theta).float()  #  seqlen headim//2
+    # theta = reshape_for_broadcast(theta,query_real)
+    theta = theta.unsqueeze(0).unsqueeze(2) # 1 seqlen 1 headim//2
+    # print('tehat shape',theta.shape)
+    cos = torch.cos(theta)
+    sin = torch.sin(theta)
+    query_real1 = query_real * cos - query_imag * sin
+    query_imag1 = query_real * cos + query_imag * sin
+
+    key_real1 = key_real * cos - key_imag * sin
+    key_imag1 = key_real * cos + key_imag * sin
+
 
     # First, compute the trigonometric values in the second and fourth columns in
     # slide 22 (linked above).
@@ -67,9 +81,9 @@ def apply_rotary_emb(
     # Then, combine these trigonometric values with the tensors query_real, query_imag,
     # key_real, and key_imag.
 
-    raise NotImplementedError
+    # raise NotImplementedError
 
-    query_out = None
-    key_out = None
+    query_out = torch.cat((query_real1,query_imag1),dim=-1).reshape(query.shape[:-1]+(-1,2)).transpose(-1,-2).reshape(query.shape)
+    key_out =  torch.cat((key_real1,key_imag1),dim=-1).reshape(query.shape[:-1]+(-1,2)).transpose(-1,-2).reshape(query.shape)
     # Return the rotary position embeddings for the query and key tensors
     return query_out, key_out

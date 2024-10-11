@@ -44,7 +44,9 @@ class RMSNorm(torch.nn.Module):
             torch.Tensor: The normalized tensor.
         """
         # todo
-        raise NotImplementedError
+        # raise NotImplementedError
+        root = ((x ** 2).mean(dim=-1,keepdim=True) + self.eps) ** 0.5
+        return x / root
 
     def forward(self, x):
         """
@@ -94,7 +96,15 @@ class Attention(nn.Module):
         attention matrix before applying it to the value tensor.
         '''
         # todo
-        raise NotImplementedError
+        # raise NotImplementedError
+        bs, n_local_heads, seqlen, head_dim = query.shape
+        scores = query @ key.transpose(2,3) / math.sqrt(head_dim) #bs, n_local_heads, seqlen, seqlen
+        masked = torch.tril(torch.ones(seqlen, seqlen))
+        scores = scores.masked_fill(masked==0.,float('-inf')) 
+        scores = F.softmax(scores,dim=-1)
+        scores = self.attn_dropout(scores)
+        value = scores @ value 
+        return value
 
     def forward(
         self,
@@ -197,7 +207,10 @@ class LlamaLayer(nn.Module):
            output of the feed-forward network
         '''
         # todo
-        raise NotImplementedError
+        # raise NotImplementedError
+        x = x + self.attention(self.attention_norm(x))
+        x = x + self.feed_forward(self.ffn_norm(x))
+        return x
 
 class Llama(LlamaPreTrainedModel):
     def __init__(self, config: LlamaConfig):
@@ -253,7 +266,6 @@ class Llama(LlamaPreTrainedModel):
         else:
             # inference-time mini-optimization: only forward the output on the very last position
             logits = self.output(h[:, [-1], :]) # note: using list [-1] to preserve the time dim
-
         return logits, h
 
     @torch.inference_mode()
@@ -269,16 +281,18 @@ class Llama(LlamaPreTrainedModel):
         """
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
+
+            ## idx  Batch_size seqlen
             idx_cond = idx if idx.size(1) <= self.params.max_seq_len else idx[:, -self.params.max_seq_len:]
             # forward the model to get the logits for the index in the sequence
             logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] # crop to just the final time step
+            logits = logits[:, -1, :] # crop to just the final time step # Batch vocab_size
             # todo
-            raise NotImplementedError
+            # raise NotImplementedError
 
             if temperature == 0.0:
                 # select the single most likely index
-                idx_next = None
+                idx_next = torch.argmax(logits,dim=-1,keepdim=True) # batch_size,1
             else:
                 '''
                 Perform temperature sampling:
@@ -289,11 +303,11 @@ class Llama(LlamaPreTrainedModel):
 
                 Note that we are not using top-k sampling/nucleus sampling in this procedure.
                 '''
-                idx_next = None
+                logits = logits / temperature
+                probs = F.softmax(logits,dim=-1)
+                idx_next = torch.multinomial(probs,num_samples=1) # batch_size 1
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
-
-
         return idx
 
 def load_pretrained(checkpoint):
